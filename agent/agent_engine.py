@@ -7,160 +7,133 @@ import time
 import re
 import paho.mqtt.client as mqtt
 from agent.tools import DeviceTools
+from agent.llm_engine import LLMEngine
 
 
 class MQTTListener:
-    """MQTT 监听器 - 在后台收集设备数据"""
-
-    def __init__(self, tools: DeviceTools, broker="localhost", port=1883):
+    def __init__(self, tools, broker="localhost", port=1883):
         self.tools = tools
-        self.broker = broker
-        self.port = port
-        self.client = mqtt.Client(client_id=f"agent_listener_{int(time.time())}")
+        self.client = mqtt.Client(client_id=f"listener_{int(time.time())}")
         self.client.on_connect = self._on_connect
         self.client.on_message = self._on_message
-        self.running = False
 
     def _on_connect(self, client, userdata, flags, rc):
         if rc == 0:
             print("[Agent] MQTT 监听器已连接")
             client.subscribe("devices/+/telemetry")
             client.subscribe("devices/alerts")
-        else:
-            print(f"[Agent] 监听器连接失败: {rc}")
 
     def _on_message(self, client, userdata, msg):
         try:
             payload = json.loads(msg.payload.decode())
             if msg.topic == "devices/alerts":
-                device_id = payload.get("device_id")
-                if device_id:
-                    self.tools.update_alert_cache(device_id, payload)
+                did = payload.get("device_id")
+                if did:
+                    self.tools.update_alert_cache(did, payload)
             elif "/telemetry" in msg.topic:
-                device_id = payload.get("device_id")
-                device_type = payload.get("device_type")
-                if device_id:
-                    self.tools.update_device_cache(device_id, device_type, payload)
+                did = payload.get("device_id")
+                dtype = payload.get("device_type")
+                if did:
+                    self.tools.update_device_cache(did, dtype, payload)
         except Exception:
             pass
 
     def start(self):
-        self.running = True
-        self.client.connect(self.broker, self.port, 60)
+        self.client.connect("localhost", 1883, 60)
         self.client.loop_start()
 
     def stop(self):
-        self.running = False
         self.client.loop_stop()
         self.client.disconnect()
 
 
 class RuleEngine:
-    """规则引擎 - 基于关键词匹配"""
-
-    def __init__(self, tools: DeviceTools):
+    def __init__(self, tools):
         self.tools = tools
 
     def process(self, user_input: str) -> str:
-        user_input_lower = user_input.lower()
-
-        if any(kw in user_input_lower for kw in ["扫描", "设备列表", "在线", "scan", "list"]):
+        u = user_input.lower()
+        if any(kw in u for kw in ["扫描", "设备列表", "在线", "scan"]):
             return self.tools.scan_devices()
-
-        if any(kw in user_input_lower for kw in ["告警", "报警", "alert", "故障", "异常"]):
+        if any(kw in u for kw in ["告警", "报警", "alert", "故障"]):
             alerts = self.tools.get_all_alerts()
             if "没有" not in alerts:
                 for at in ["temp_high", "vibration_high", "current_overload", "co2_high"]:
                     if at in alerts:
-                        kb = self.tools.query_knowledge(at)
-                        return alerts + "\n\n📚 知识库建议:\n" + kb
+                        return alerts + "\n\n📚 知识库:\n" + self.tools.query_knowledge(at)
             return alerts
-
         for did in ["temp_sensor_01", "vibration_01", "motor_01", "light_01", "env_01"]:
-            if did in user_input_lower:
-                t = self.tools.get_telemetry(did)
-                tr = self.tools.analyze_trend(did)
-                return t + "\n" + tr
-
-        if any(kw in user_input_lower for kw in ["知识库", "原因", "建议", "怎么办", "处理"]):
+            if did in u:
+                return self.tools.get_telemetry(did) + "\n" + self.tools.analyze_trend(did)
+        if any(kw in u for kw in ["知识库", "原因", "建议"]):
             for at in ["temp_high", "vibration_high", "current_overload", "co2_high"]:
-                if at.replace("_", "") in user_input_lower.replace(" ", ""):
+                if at.replace("_", "") in u.replace(" ", ""):
                     return self.tools.query_knowledge(at)
-            return "请指定告警类型: temp_high, vibration_high, current_overload, co2_high"
-
-        if "降速" in user_input_lower or "减速" in user_input_lower:
-            numbers = re.findall(r'\d+', user_input)
-            speed = int(numbers[0]) if numbers else 800
-            return self.tools.send_command("motor_01", "set_speed", speed)
-
-        if "关灯" in user_input_lower or "关闭灯光" in user_input_lower:
-            return self.tools.send_command("light_01", "off")
-
-        if "开灯" in user_input_lower or "打开灯光" in user_input_lower:
-            return self.tools.send_command("light_01", "on")
-
+            return "告警类型: temp_high, vibration_high, current_overload, co2_high"
+        if "降速" in u or "减速" in u:
+            nums = re.findall(r'\d+', user_input)
+            return self.tools.send_command("motor_01", "set_speed", int(nums[0]) if nums else 800)
+        if "关灯" in u: return self.tools.send_command("light_01", "off")
+        if "开灯" in u: return self.tools.send_command("light_01", "on")
         return self._help()
 
     def _help(self):
         return """
-🤖 设备运维 Agent (规则引擎模式)
+🤖 设备运维 Agent (LLM模式)
 
-可用命令:
-  • "扫描设备" - 查看所有在线设备
-  • "查看告警" - 查看当前告警状态
-  • "temp_sensor_01 状态" - 查询具体设备
-  • "温度过高怎么办" - 查询知识库
-  • "电机降速到 800" - 下发控制指令
-  • "关灯" / "开灯" - 控制智能灯
-
-💡 提示: 安装 LangChain 可获得 AI 驱动智能诊断:
-   pip install langchain langchain-openai
+自然语言交互示例:
+  • "检查所有设备状态"
+  • "为什么温度传感器告警了？"
+  • "帮我分析一下振动传感器的数据"
+  • "电机降速到 800"
+  • "关灯" / "开灯"
+  • "扫描设备" / "查看告警"
 """
 
 
 class DeviceAgent:
-    """设备运维 Agent 主类"""
-
-    def __init__(self, broker="localhost", port=1883):
-        self.tools = DeviceTools(broker, port)
-        self.listener = MQTTListener(self.tools, broker, port)
+    def __init__(self, use_llm=True):
+        self.tools = DeviceTools()
+        self.listener = MQTTListener(self.tools)
         self.rule_engine = RuleEngine(self.tools)
+        self.llm_engine = LLMEngine(self.tools) if use_llm else None
+        self.use_llm = use_llm and self.llm_engine and self.llm_engine.available
 
     def start(self):
-        print("🤖 设备运维 Agent 启动中...")
+        mode = "LLM 智能诊断" if self.use_llm else "规则引擎"
+        print(f"🤖 Agent 启动中... (模式: {mode})")
         self.listener.start()
         time.sleep(2)
         print("✅ Agent 就绪\n")
 
     def stop(self):
         self.listener.stop()
-        print("Agent 已停止")
 
     def chat(self, user_input: str) -> str:
+        if self.use_llm:
+            result = self.llm_engine.diagnose(user_input)
+            if result:
+                return result
         return self.rule_engine.process(user_input)
 
 
 def interactive_shell(agent: DeviceAgent):
+    mode = "LLM 智能诊断" if agent.use_llm else "规则引擎"
     print("=" * 60)
-    print("🤖 嵌入式设备运维 AI Agent")
+    print(f"🤖 嵌入式设备运维 AI Agent ({mode})")
     print("=" * 60)
     print("输入 'help' 查看帮助, 'quit' 退出\n")
 
     while True:
         try:
             user_input = input("💬 You: ").strip()
-            if not user_input:
-                continue
+            if not user_input: continue
             if user_input.lower() in ["quit", "exit", "q"]:
-                print("👋 再见!")
-                break
+                print("👋 再见!"); break
             if user_input.lower() == "help":
-                print(agent.rule_engine._help())
-                continue
+                print(agent.rule_engine._help()); continue
+            print("🤖 思考中...")
             response = agent.chat(user_input)
             print(f"\n🤖 Agent:\n{response}\n")
         except KeyboardInterrupt:
-            print("\n👋 再见!")
-            break
-        except Exception as e:
-            print(f"\n❌ 错误: {e}\n")
+            print("\n👋 再见!"); break
