@@ -153,10 +153,13 @@ class DeviceTools:
     
     def get_all_alerts(self) -> str:
         alerts_found = []
+        current_time = time.time()
         for device_id, info in self.device_cache.items():
             if info.get("last_alert"):
                 alert = info["last_alert"]
-                alerts_found.append(f"  {device_id}: {alert['alert_type']} = {alert['value']} ({alert['severity']})")
+                alert_time = alert.get("alert_time", 0)
+                if current_time - alert_time < 30:
+                    alerts_found.append(f"  {device_id}: {alert['alert_type']} = {alert['value']} ({alert['severity']})")
         
         if not alerts_found:
             return "当前没有活跃告警。"
@@ -164,11 +167,18 @@ class DeviceTools:
         return "当前告警列表:\n" + "\n".join(alerts_found)
     
     def update_device_cache(self, device_id, device_type, data=None):
+        old_alert = None
+        if device_id in self.device_cache:
+            old_alert = self.device_cache[device_id].get("last_alert")
+        
         self.device_cache[device_id] = {
             "device_type": device_type,
             "last_seen": time.time(),
             "last_data": data
         }
+        
+        if old_alert:
+            self.device_cache[device_id]["last_alert"] = old_alert
         
         if data:
             self.telemetry_history[device_id].append(data)
@@ -176,5 +186,11 @@ class DeviceTools:
                 self.telemetry_history[device_id] = self.telemetry_history[device_id][-self.max_history:]
     
     def update_alert_cache(self, device_id, alert_data):
-        if device_id in self.device_cache:
-            self.device_cache[device_id]["last_alert"] = alert_data
+        alert_data["alert_time"] = time.time()
+        if device_id not in self.device_cache:
+            self.device_cache[device_id] = {
+                "device_type": "unknown",
+                "last_seen": time.time(),
+                "last_data": None
+            }
+        self.device_cache[device_id]["last_alert"] = alert_data
