@@ -1,0 +1,49 @@
+# 端云协同设备运维 Agent 配置
+# 所有项都有默认值，按需覆盖即可。
+
+mqtt:
+  host: localhost
+  port: 1883
+  client_id: devops-agent
+  keepalive: 30
+  # username: admin
+  # password: secret
+
+llm:
+  enabled: true
+  base_url: http://localhost:11434
+  model: qwen2.5:3b          # 1.5b 在长上下文下指令遵循能力不足
+  timeout_s: 45
+  temperature: 0.1           # 诊断场景要稳定，不要发散
+  max_tool_rounds: 3
+
+storage:
+  path: data/agent.db
+
+agent:
+  offline_after_periods: 3   # 连续 3 个上报周期没消息即判离线
+  command_timeout_s: 10      # 指令等待回执超时
+
+# source: hardware = ESP32 真实节点上报；simulator = 本仓库虚拟设备
+# 设备 ID 必须与固件 Kconfig 中的 CONFIG_APP_DEVICE_*_ID 一致
+devices:
+  temp_sensor_01:
+    type: temperature_sensor
+    interval_s: 2
+    source: hardware
+  vibration_01:
+    type: vibration_sensor
+    interval_s: 2
+    source: hardware
+  motor_01:
+    type: motor_controller
+    interval_s: 1
+    source: simulator
+  light_01:
+    type: smart_light
+    interval_s: 3
+    source: simulator
+  env_01:
+    type: env_monitor
+    interval_s: 5
+    source: simulator

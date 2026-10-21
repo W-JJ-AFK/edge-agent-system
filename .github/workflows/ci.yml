@@ -1,0 +1,54 @@
+name: ci
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: pytest (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 语法检查（不依赖 broker / LLM）
+        run: python -m compileall -q agent tests scripts
+
+      - name: 单元测试
+        run: python -m pytest -q
+
+  smoke:
+    name: CLI 冒烟（无 broker 降级路径）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      # broker 不存在时必须优雅降级，而不是抛异常
+      - name: 无 broker 时应打印告警并继续
+        run: |
+          set +e
+          timeout 20 python -m agent.cli --no-llm --once "help" > out.txt 2>&1
+          code=$?
+          cat out.txt
+          test $code -eq 0 || test $code -eq 124
+          grep -q "MQTT 连接失败\|设备运维 Agent" out.txt

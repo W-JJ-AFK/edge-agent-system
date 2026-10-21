@@ -1,0 +1,45 @@
+# 一键拉起本地依赖：MQTT broker + 本地 LLM
+#
+#   docker compose -f deploy/docker-compose.yml up -d
+#   docker compose -f deploy/docker-compose.yml exec ollama ollama pull qwen2.5:3b
+#
+# 只想要 broker（不需要 LLM 也能跑，Agent 会自动降级到规则引擎）：
+#   docker compose -f deploy/docker-compose.yml up -d mosquitto
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: iot-mosquitto
+    ports:
+      - "1883:1883"   # MQTT over TCP
+      - "9001:9001"   # MQTT over WebSocket（可选，给浏览器端调试用）
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto-data:/mosquitto/data
+    restart: unless-stopped
+    healthcheck:
+      # $$ 是 compose 的转义，实际传给 shell 的是 $SYS/#
+      test: ["CMD-SHELL", "mosquitto_sub -h localhost -t '$$SYS/broker/uptime' -C 1 -W 3 > /dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: iot-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  mosquitto-data:
+  ollama-models:

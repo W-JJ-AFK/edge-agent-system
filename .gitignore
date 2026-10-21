@@ -3,3 +3,18 @@ __pycache__/
 *.pyc
 .env
 *.log
+
+# 运行时数据（SQLite 库、pid）
+data/
+*.db
+*.db-journal
+
+# 本地配置覆盖
+config.local.yaml
+
+# 测试与工具缓存
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/

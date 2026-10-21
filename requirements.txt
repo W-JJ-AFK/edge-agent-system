@@ -1,5 +1,7 @@
 paho-mqtt>=2.0.0
 streamlit>=1.35.0
-langchain>=0.3.0
-langchain-ollama>=0.1.0
 requests>=2.31.0
+PyYAML>=6.0
+
+# 开发依赖
+pytest>=8.0
